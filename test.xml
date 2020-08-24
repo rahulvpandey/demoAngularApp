@@ -1,0 +1,162 @@
+<?xml version="1.0" encoding="UTF-8"?><unload unload_date="2020-08-24 10:10:23">
+<sys_remote_update_set action="INSERT_OR_UPDATE">
+<application display_value="Global">global</application>
+<application_name>Global</application_name>
+<application_scope>global</application_scope>
+<application_version/>
+<collisions/>
+<commit_date/>
+<deleted/>
+<description/>
+<inserted/>
+<name>Latest Github Demo</name>
+<origin_sys_id/>
+<parent display_value=""/>
+<release_date/>
+<remote_base_update_set display_value=""/>
+<remote_parent_id/>
+<remote_sys_id>2b99ed76db2210105c57e4da4b96195e</remote_sys_id>
+<state>loaded</state>
+<summary/>
+<sys_class_name>sys_remote_update_set</sys_class_name>
+<sys_created_by>admin</sys_created_by>
+<sys_created_on>2020-08-24 10:10:23</sys_created_on>
+<sys_id>d6b4898adbf250105c57e4da4b961933</sys_id>
+<sys_mod_count>0</sys_mod_count>
+<sys_updated_by>admin</sys_updated_by>
+<sys_updated_on>2020-08-24 10:10:23</sys_updated_on>
+<update_set display_value=""/>
+<update_source display_value=""/>
+<updated/>
+</sys_remote_update_set>
+<sys_update_xml action="INSERT_OR_UPDATE">
+<action>INSERT_OR_UPDATE</action>
+<application display_value="Global">global</application>
+<category>customer</category>
+<comments/>
+<name>sys_script_include_804437e7db02101011699fd2ca961902</name>
+<payload>&lt;?xml version="1.0" encoding="UTF-8"?&gt;&lt;record_update table="sys_script_include"&gt;&lt;sys_script_include action="INSERT_OR_UPDATE"&gt;&lt;access&gt;public&lt;/access&gt;&lt;active&gt;true&lt;/active&gt;&lt;api_name&gt;global.acngitUtils&lt;/api_name&gt;&lt;caller_access/&gt;&lt;client_callable&gt;false&lt;/client_callable&gt;&lt;description&gt;#developed by rahul pandey &amp;#13;
+Prerequisite  GIT user with appropriate rights and personal api key&amp;#13;
+System properties :&amp;#13;
+gitHubuser : github user id&amp;#13;
+gitHubPassword : user password&amp;#13;
+CommitUser : local user account with admin rights&amp;#13;
+CommitUserPassword : local user account password&amp;#13;
+// capture&lt;/description&gt;&lt;name&gt;acngitUtils&lt;/name&gt;&lt;script&gt;&lt;![CDATA[var acngitUtils = Class.create();
+acngitUtils.prototype = {
+    initialize: function() {
+        this.source = "acngitUtils";
+    },
+    prepareUpdateset: function(current) {
+        var updateSetExport = new UpdateSetExport();
+        var sysid = updateSetExport.exportUpdateSet(current);
+        var url = "https://" + gs.getProperty("instance_name") + ".service-now.com/export_update_set.do?sysparm_sys_id=" + sysid + "&amp;sysparm_delete_when_done=true";
+        var request = new sn_ws.RESTMessageV2();
+        request.setEndpoint(url);
+        request.setHttpMethod('GET');
+        var user = gs.getProperty("CommitUser");
+        var password = gs.getProperty("CommitUserPassword");
+        request.setBasicAuth(user, password);
+        request.setRequestHeader("Accept", "application/json");
+        var updatesetid = request.saveResponseBodyAsAttachment(current.getTableName(), current.sys_id, current.getValue('name') + ".xml");
+        var response = request.execute();
+        var httpStatus = response.getStatusCode();
+		var name = current.getValue('name').replace(/\s/g,'');
+        return this.createRepo(name, response.getResponseAttachmentSysid());
+    },
+	
+
+    createRepo: function(name, contentid) {
+        try {
+            var r = new sn_ws.RESTMessageV2('gitHubApi', 'createRepo');
+            var user = gs.getProperty("gitHubuser");
+            var password = gs.getProperty("gitHubPassword");
+            r.setBasicAuth(user, password);
+            var data = JSON.stringify({
+                "name": name,
+                "private": true
+            });
+            r.setRequestBody(data);
+            var response = r.execute();
+            var responseBody = response.getBody();
+            var httpStatus = response.getStatusCode();
+            if (httpStatus == "201")
+                return this.commitGit(name, contentid);
+            else if (httpStatus == "422")
+                return "Error:Updateset already committed";
+            else
+                return "Error occurred";
+
+        } catch (ex) {
+            var message = ex.message;
+        }
+    },
+    commitGit: function(updatesetName, attachmentid) {
+        var password = gs.getProperty("gitHubPassword");
+        var user = gs.getProperty("gitHubuser");
+        try {
+            var base64Data = this.getBase64(attachmentid);
+            var authKey = "token " + password;
+            var r = new sn_ws.RESTMessageV2('gitHubApi', 'uploadContent');
+            r.setHttpMethod("PUT");
+            r.setEndpoint('https://api.github.com/repos/' + user + '/' + updatesetName + '/contents/' + updatesetName + '.xml');
+            r.setRequestHeader('Authorization', authKey);
+            r.setRequestHeader("Content-Type", "application/vnd.github.v3+json");
+            var data = {
+                "message": "Auto commited",
+                "committer": {
+                    "name": gs.getUserName(),
+                    "email": gs.getUser().getEmail()
+                },
+                "content": base64Data
+            };
+            var newdata = JSON.stringify(data);
+            r.setRequestBody(newdata);
+            var response = r.execute();
+            var responseBody = response.getBody();
+            var httpStatus = response.getStatusCode();
+            gs.log("responseBody " + responseBody, this.source);
+            gs.log("httpStatus " + httpStatus, this.source);
+            if (httpStatus == "201")
+                return "Updateset Committed successfully!";
+            else
+                return "Error Occurred";
+        } catch (ex) {
+            var message = ex.message;
+        }
+    },
+    validation: function() {
+        // your logic for further validation
+    },
+    getBase64: function(id) {
+        var get64 = new GlideRecord('sys_attachment');
+        if (get64.get(id)) {
+            var sa = new GlideSysAttachment();
+            var binData = sa.getBytes(get64);
+            var encData = GlideStringUtil.base64Encode(binData);
+            return encData;
+        }
+    },
+
+    type: 'acngitUtils'
+};]]&gt;&lt;/script&gt;&lt;sys_class_name&gt;sys_script_include&lt;/sys_class_name&gt;&lt;sys_created_by&gt;Rahul&lt;/sys_created_by&gt;&lt;sys_created_on&gt;2020-07-23 08:50:44&lt;/sys_created_on&gt;&lt;sys_id&gt;804437e7db02101011699fd2ca961902&lt;/sys_id&gt;&lt;sys_mod_count&gt;17&lt;/sys_mod_count&gt;&lt;sys_name&gt;acngitUtils&lt;/sys_name&gt;&lt;sys_package display_value="Global" source="global"&gt;global&lt;/sys_package&gt;&lt;sys_policy/&gt;&lt;sys_scope display_value="Global"&gt;global&lt;/sys_scope&gt;&lt;sys_update_name&gt;sys_script_include_804437e7db02101011699fd2ca961902&lt;/sys_update_name&gt;&lt;sys_updated_by&gt;admin&lt;/sys_updated_by&gt;&lt;sys_updated_on&gt;2020-08-14 10:31:42&lt;/sys_updated_on&gt;&lt;/sys_script_include&gt;&lt;/record_update&gt;</payload>
+<payload_hash>474436244</payload_hash>
+<remote_update_set display_value="Latest Github Demo">d6b4898adbf250105c57e4da4b961933</remote_update_set>
+<replace_on_upgrade>false</replace_on_upgrade>
+<sys_created_by>admin</sys_created_by>
+<sys_created_on>2020-08-24 10:10:23</sys_created_on>
+<sys_id>dab4898adbf250105c57e4da4b961933</sys_id>
+<sys_mod_count>0</sys_mod_count>
+<sys_recorded_at>173ec8677af0000001</sys_recorded_at>
+<sys_updated_by>admin</sys_updated_by>
+<sys_updated_on>2020-08-24 10:10:23</sys_updated_on>
+<table/>
+<target_name>acngitUtils</target_name>
+<type>Script Include</type>
+<update_domain>global</update_domain>
+<update_guid>85b925f2fa221010726c2b42b8500ae7</update_guid>
+<update_guid_history>85b925f2fa221010726c2b42b8500ae7:474436244,e3896d7632221010b39329e9609d2f3f:-205904216,118569fbed061010276b43eeb50709b6:-412845425,3021297ba0061010499bac9e33d53355:-716126556,fc3f9df791061010dcfb9987842d29c0:759131032,a8fed5f7b106101015c270103790f1d6:1139223435,23ae9df7a80610103aab8c97f8da76b7:-1794034201,2f5cd537cd061010d582e97645d02ff2:-801906924,a72c15b778061010a8f3fb2517111f3f:-588089876,250c9577b7061010e45899b34abb8d8e:-1733899284,568a9c7fb642101053df74d9b1c83d42:1359560000,d958147fb3421010617920ec100ca526:1686176004,c338d0bfaa4210109238c4a1c3fbd5d0:-1969325069,33d7dc7f2c421010c5cc60f3b21e94b8:-350855473,3de6d07fdd4210103d587174a19e4e66:-15148640,24b61c3f374210109cc523eabc14fae4:1196156741,ff95583f2b421010808a0d648cd16547:-89139082,af9f3bef99021010451132fccdd9e96b:1434271491</update_guid_history>
+<update_set display_value=""/>
+<view/>
+</sys_update_xml>
+</unload>
